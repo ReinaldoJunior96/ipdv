@@ -86,7 +86,8 @@ const filteredRows = computed(() => {
           .toLowerCase()
           .includes(normalizedSearch),
       ) ||
-      row.__errors.some((error) => error.toLowerCase().includes(normalizedSearch))
+      row.__errors.some((error) => error.toLowerCase().includes(normalizedSearch)) ||
+      row.__warnings.some((warning) => warning.toLowerCase().includes(normalizedSearch))
 
     return matchesUf && matchesStatus && matchesSearch
   })
@@ -123,6 +124,44 @@ function normalizeText(value) {
 
 function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '')
+}
+
+function expandScientificNotation(value) {
+  const normalizedValue = normalizeText(value)
+  const scientificMatch = normalizedValue.match(/^(\d+)(?:[.,](\d+))?[eE]\+?(\d+)$/)
+
+  if (!scientificMatch) {
+    return null
+  }
+
+  const integerPart = scientificMatch[1]
+  const fractionalPart = scientificMatch[2] || ''
+  const exponent = Number(scientificMatch[3])
+  const significantDigits = `${integerPart}${fractionalPart}`
+  const zeroCount = exponent - fractionalPart.length
+
+  if (Number.isNaN(exponent) || zeroCount < 0) {
+    return null
+  }
+
+  return `${significantDigits}${'0'.repeat(zeroCount)}`
+}
+
+function normalizeDocumentField(value, label) {
+  const normalizedValue = normalizeText(value)
+  const scientificValue = expandScientificNotation(normalizedValue)
+
+  if (scientificValue) {
+    return {
+      value: scientificValue,
+      warning: `${label} veio em notacao cientifica e foi normalizado para visualizacao.`,
+    }
+  }
+
+  return {
+    value: normalizeDigits(normalizedValue),
+    warning: '',
+  }
 }
 
 function normalizeOptionalEmail(value) {
@@ -211,8 +250,12 @@ function parseCsv(text) {
 }
 
 function normalizeRow(rawRow) {
+  const cnpjField = normalizeDocumentField(rawRow.cnpj, 'CNPJ')
+  const cepField = normalizeDocumentField(rawRow.cep, 'CEP')
+  const cpfField = normalizeDocumentField(rawRow.cpf_responsavel, 'CPF do responsavel')
+
   return {
-    cnpj: normalizeDigits(rawRow.cnpj),
+    cnpj: cnpjField.value,
     nome_posto: normalizeText(rawRow.nome_posto),
     nome_fantasia: normalizeText(rawRow.nome_fantasia),
     bandeira: normalizeText(rawRow.bandeira),
@@ -222,8 +265,8 @@ function normalizeRow(rawRow) {
     bairro: normalizeText(rawRow.bairro),
     municipio: normalizeText(rawRow.municipio),
     uf: normalizeText(rawRow.uf).toUpperCase(),
-    cep: normalizeDigits(rawRow.cep),
-    cpf_responsavel: normalizeDigits(rawRow.cpf_responsavel),
+    cep: cepField.value,
+    cpf_responsavel: cpfField.value,
     nome_responsavel: normalizeText(rawRow.nome_responsavel),
     email_responsavel: normalizeOptionalEmail(rawRow.email_responsavel),
     cargo_responsavel: normalizeText(rawRow.cargo_responsavel),
@@ -233,6 +276,7 @@ function normalizeRow(rawRow) {
     numero_bicos: normalizeText(rawRow.numero_bicos),
     numero_pistas: normalizeText(rawRow.numero_pistas),
     observacoes: normalizeText(rawRow.observacoes),
+    __warnings: [cnpjField.warning, cepField.warning, cpfField.warning].filter(Boolean),
   }
 }
 
@@ -294,6 +338,7 @@ async function parseAndStoreFile(file) {
       ...normalizedRow,
       __lineNumber: lineNumber,
       __errors: rowErrors,
+      __warnings: normalizedRow.__warnings,
       __isValid: rowErrors.length === 0,
     }
   })
@@ -539,6 +584,11 @@ function handleDrop(event) {
                           <div v-if="row.__errors.length" class="row-errors">
                             <div v-for="error in row.__errors" :key="error">
                               {{ error }}
+                            </div>
+                          </div>
+                          <div v-if="row.__warnings.length" class="row-warnings">
+                            <div v-for="warning in row.__warnings" :key="warning">
+                              {{ warning }}
                             </div>
                           </div>
                         </td>

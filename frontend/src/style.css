@@ -211,6 +211,16 @@ body {
   color: #92400e;
 }
 
+.row-warnings {
+  margin-top: 8px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  white-space: normal;
+  color: #17624a;
+}
+
 .row-invalid td {
   background: rgba(245, 158, 11, 0.06);
 }
