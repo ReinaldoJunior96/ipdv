@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS postos (
+  id BIGSERIAL PRIMARY KEY,
+  cnpj VARCHAR(14) NOT NULL UNIQUE,
+  nome_posto VARCHAR(255) NOT NULL,
+  nome_fantasia VARCHAR(255),
+  bandeira_id BIGINT REFERENCES bandeiras(id),
+  responsavel_id BIGINT REFERENCES responsaveis(id),
+  logradouro VARCHAR(255) NOT NULL,
+  numero VARCHAR(30),
+  complemento VARCHAR(255),
+  bairro VARCHAR(120) NOT NULL,
+  municipio VARCHAR(120) NOT NULL,
+  uf CHAR(2) NOT NULL,
+  cep VARCHAR(8) NOT NULL,
+  status VARCHAR(50) NOT NULL,
+  data_inauguracao DATE,
+  numero_bicos INTEGER,
+  numero_pistas INTEGER,
+  observacoes TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
