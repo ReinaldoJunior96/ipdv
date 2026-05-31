@@ -26,7 +26,7 @@ async function getPendingMigrations() {
     'SELECT filename FROM schema_migrations',
   )
 
-  const executed = new Set(rows.map((row) => row.filename))
+  const executed = new Set(rows.map((row: { filename: string }) => row.filename))
   return files.filter((file) => !executed.has(file))
 }
 
