@@ -7,6 +7,7 @@ const isDragging = ref(false)
 const isParsing = ref(false)
 const isSubmitting = ref(false)
 const isLoadingPersisted = ref(false)
+const isClearingPersisted = ref(false)
 const selectedFile = ref(null)
 const validationError = ref('')
 const importedRows = ref([])
@@ -466,6 +467,50 @@ async function fetchPersistedPostos() {
   }
 }
 
+async function clearPersistedPostos() {
+  const confirmed = window.confirm(
+    'Isso vai apagar todos os postos cadastrados e o historico de importacoes. Deseja continuar?',
+  )
+
+  if (!confirmed) {
+    return
+  }
+
+  isClearingPersisted.value = true
+  persistedError.value = ''
+
+  try {
+    const { data } = await axios.delete(`${apiBaseUrl}/postos`)
+    persistedRows.value = []
+    importResponse.value = null
+    selectedFile.value = null
+    importedRows.value = []
+    validationError.value = ''
+    submitError.value = ''
+    searchTerm.value = ''
+    selectedUf.value = null
+    selectedStatus.value = null
+    persistedError.value = data.message || 'Dados cadastrados limpos com sucesso.'
+  } catch (error) {
+    persistedError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      'Falha ao limpar os dados cadastrados.'
+  } finally {
+    isClearingPersisted.value = false
+  }
+}
+
+function exportPostos() {
+  persistedError.value = ''
+
+  const link = document.createElement('a')
+  link.href = `${apiBaseUrl}/postos/exportar`
+  link.target = '_blank'
+  link.rel = 'noopener'
+  link.click()
+}
+
 function openFilePicker() {
   fileInput.value?.click()
 }
@@ -779,6 +824,23 @@ onMounted(() => {
                       {{ persistedSummary }}
                     </v-chip>
                     <v-btn
+                      color="error"
+                      variant="tonal"
+                      rounded="pill"
+                      :loading="isClearingPersisted"
+                      @click="clearPersistedPostos"
+                    >
+                      Limpar banco
+                    </v-btn>
+                    <v-btn
+                      color="primary"
+                      variant="flat"
+                      rounded="pill"
+                      @click="exportPostos"
+                    >
+                      Exportar dados
+                    </v-btn>
+                    <v-btn
                       color="primary"
                       variant="outlined"
                       rounded="pill"
@@ -793,7 +855,7 @@ onMounted(() => {
                 <v-alert
                   v-if="persistedError"
                   class="mb-4"
-                  type="error"
+                  :type="persistedRows.length ? 'error' : 'success'"
                   variant="tonal"
                   density="comfortable"
                   rounded="lg"
