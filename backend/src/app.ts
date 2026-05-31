@@ -1,6 +1,7 @@
 import express from 'express'
 import cors from 'cors'
 import multer from 'multer'
+import { handlePostosImport } from './imports/postosImportHandler.js'
 import { handlePostosPreview } from './imports/postosPreviewHandler.js'
 
 export function createApp() {
@@ -24,6 +25,10 @@ export function createApp() {
 
   app.post('/importacoes/postos/preview', upload.single('file'), (req: any, res: any) => {
     return handlePostosPreview(req, res)
+  })
+
+  app.post('/importacoes/postos', upload.single('file'), async (req: any, res: any) => {
+    return handlePostosImport(req, res)
   })
 
   return app
