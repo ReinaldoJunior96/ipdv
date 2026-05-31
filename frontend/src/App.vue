@@ -1,15 +1,23 @@
 <script setup>
-import { computed, ref } from 'vue'
+import axios from 'axios'
+import { computed, onMounted, ref } from 'vue'
 
 const fileInput = ref(null)
 const isDragging = ref(false)
 const isParsing = ref(false)
+const isSubmitting = ref(false)
+const isLoadingPersisted = ref(false)
 const selectedFile = ref(null)
 const validationError = ref('')
 const importedRows = ref([])
+const persistedRows = ref([])
+const importResponse = ref(null)
+const submitError = ref('')
+const persistedError = ref('')
 const searchTerm = ref('')
 const selectedUf = ref(null)
 const selectedStatus = ref(null)
+const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 const columns = [
   { key: 'cnpj', label: 'CNPJ' },
@@ -99,6 +107,15 @@ const filteredSummary = computed(() => {
   }
 
   return `${filteredRows.value.length} de ${importedRows.value.length} registro${importedRows.value.length > 1 ? 's' : ''}`
+})
+
+const canSubmit = computed(() => {
+  return Boolean(selectedFile.value) && !isParsing.value && !isSubmitting.value
+})
+
+const persistedSummary = computed(() => {
+  const total = persistedRows.value.length
+  return `${total} posto${total !== 1 ? 's' : ''} cadastrado${total !== 1 ? 's' : ''}`
 })
 
 function isCsvFile(file) {
@@ -353,11 +370,15 @@ async function setFile(file) {
     selectedFile.value = null
     importedRows.value = []
     validationError.value = 'Selecione um arquivo com extensao .csv.'
+    submitError.value = ''
+    importResponse.value = null
     return
   }
 
   isParsing.value = true
   validationError.value = ''
+  submitError.value = ''
+  importResponse.value = null
 
   try {
     await parseAndStoreFile(file)
@@ -371,6 +392,77 @@ async function setFile(file) {
     validationError.value = error instanceof Error ? error.message : 'Falha ao ler o CSV.'
   } finally {
     isParsing.value = false
+  }
+}
+
+async function submitToBackend() {
+  if (!selectedFile.value) {
+    return
+  }
+
+  isSubmitting.value = true
+  submitError.value = ''
+  importResponse.value = null
+
+  try {
+    const formData = new FormData()
+    formData.append('file', selectedFile.value)
+
+    const { data } = await axios.post(`${apiBaseUrl}/importacoes/postos`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+
+    importResponse.value = data
+    importedRows.value = data.rows.map((row) => ({
+      ...row,
+      __lineNumber: row.lineNumber,
+      __errors: row.errors,
+      __warnings: row.warnings,
+      __isValid: row.isValid,
+    }))
+    await fetchPersistedPostos()
+  } catch (error) {
+    submitError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      'Falha ao enviar o arquivo para o backend.'
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+function mapPersistedRow(row) {
+  return {
+    ...row,
+    combustiveis: Array.isArray(row.combustiveis) ? row.combustiveis.join(', ') : row.combustiveis || '-',
+    data_inauguracao: row.data_inauguracao || '-',
+    numero_bicos: row.numero_bicos ?? '-',
+    numero_pistas: row.numero_pistas ?? '-',
+    nome_fantasia: row.nome_fantasia || '-',
+    numero: row.numero || '-',
+    complemento: row.complemento || '-',
+    email_responsavel: row.email_responsavel || '-',
+    cargo_responsavel: row.cargo_responsavel || '-',
+    observacoes: row.observacoes || '-',
+  }
+}
+
+async function fetchPersistedPostos() {
+  isLoadingPersisted.value = true
+  persistedError.value = ''
+
+  try {
+    const { data } = await axios.get(`${apiBaseUrl}/postos`)
+    persistedRows.value = data.rows.map(mapPersistedRow)
+  } catch (error) {
+    persistedError.value =
+      error?.response?.data?.message ||
+      error?.message ||
+      'Falha ao carregar os postos cadastrados.'
+  } finally {
+    isLoadingPersisted.value = false
   }
 }
 
@@ -388,6 +480,10 @@ function handleDrop(event) {
   const [file] = event.dataTransfer?.files || []
   void setFile(file)
 }
+
+onMounted(() => {
+  void fetchPersistedPostos()
+})
 </script>
 
 <template>
@@ -447,6 +543,13 @@ function handleDrop(event) {
                     rounded
                   />
 
+                  <v-progress-linear
+                    v-else-if="isSubmitting"
+                    color="primary"
+                    indeterminate
+                    rounded
+                  />
+
                   <v-alert
                     v-else-if="validationError"
                     type="error"
@@ -455,6 +558,29 @@ function handleDrop(event) {
                     rounded="lg"
                   >
                     {{ validationError }}
+                  </v-alert>
+
+                  <v-alert
+                    v-else-if="submitError"
+                    type="error"
+                    variant="tonal"
+                    density="comfortable"
+                    rounded="lg"
+                  >
+                    {{ submitError }}
+                  </v-alert>
+
+                  <v-alert
+                    v-else-if="importResponse"
+                    :type="importResponse.invalidRows > 0 ? 'warning' : 'success'"
+                    variant="tonal"
+                    density="comfortable"
+                    rounded="lg"
+                  >
+                    {{ importResponse.message }}
+                    <template v-if="typeof importResponse.importedPostos === 'number'">
+                      {{ ' ' }}{{ importResponse.importedPostos }} posto(s) cadastrado(s) no banco.
+                    </template>
                   </v-alert>
 
                   <v-alert
@@ -500,6 +626,17 @@ function handleDrop(event) {
                 <div class="actions">
                   <v-btn color="primary" size="large" rounded="pill" @click="openFilePicker">
                     Selecionar arquivo
+                  </v-btn>
+                  <v-btn
+                    color="primary"
+                    variant="flat"
+                    size="large"
+                    rounded="pill"
+                    :loading="isSubmitting"
+                    :disabled="!canSubmit"
+                    @click="submitToBackend"
+                  >
+                    Cadastrar no banco
                   </v-btn>
                 </div>
               </v-card>
@@ -624,6 +761,88 @@ function handleDrop(event) {
                   <div class="empty-title">Nenhum dado para mostrar</div>
                   <div class="empty-text">
                     Envie um CSV valido para visualizar os postos importados nesta tela.
+                  </div>
+                </v-sheet>
+              </v-card>
+
+              <v-card class="table-card mt-5" rounded="xl" elevation="0">
+                <div class="table-header persisted-header">
+                  <div>
+                    <h2 class="section-title">Postos cadastrados no banco</h2>
+                    <p class="section-subtitle">
+                      Lista simples dos registros persistidos no PostgreSQL.
+                    </p>
+                  </div>
+
+                  <div class="persisted-actions">
+                    <v-chip color="secondary" text-color="primary" variant="flat">
+                      {{ persistedSummary }}
+                    </v-chip>
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      rounded="pill"
+                      :loading="isLoadingPersisted"
+                      @click="fetchPersistedPostos"
+                    >
+                      Atualizar lista
+                    </v-btn>
+                  </div>
+                </div>
+
+                <v-alert
+                  v-if="persistedError"
+                  class="mb-4"
+                  type="error"
+                  variant="tonal"
+                  density="comfortable"
+                  rounded="lg"
+                >
+                  {{ persistedError }}
+                </v-alert>
+
+                <v-progress-linear
+                  v-else-if="isLoadingPersisted"
+                  color="primary"
+                  indeterminate
+                  rounded
+                  class="mb-4"
+                />
+
+                <v-sheet
+                  v-if="persistedRows.length"
+                  class="table-wrapper"
+                  rounded="lg"
+                  border
+                >
+                  <v-table density="comfortable" fixed-header height="420">
+                    <thead>
+                      <tr>
+                        <th v-for="column in columns" :key="`persisted-${column.key}`">
+                          {{ column.label }}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="row in persistedRows" :key="`persisted-${row.id}`">
+                        <td v-for="column in columns" :key="`persisted-${row.id}-${column.key}`">
+                          {{ row[column.key] || '-' }}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </v-table>
+                </v-sheet>
+
+                <v-sheet
+                  v-else-if="!isLoadingPersisted"
+                  class="empty-state"
+                  color="transparent"
+                  rounded="lg"
+                >
+                  <v-icon icon="mdi-database-outline" size="34" color="primary" />
+                  <div class="empty-title">Nenhum posto cadastrado ainda</div>
+                  <div class="empty-text">
+                    Importe um CSV para persistir os dados e visualizar os postos nesta lista.
                   </div>
                 </v-sheet>
               </v-card>

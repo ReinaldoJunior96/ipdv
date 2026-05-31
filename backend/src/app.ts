@@ -3,6 +3,7 @@ import cors from 'cors'
 import multer from 'multer'
 import { handlePostosImport } from './imports/postosImportHandler.js'
 import { handlePostosPreview } from './imports/postosPreviewHandler.js'
+import { handleListPostos } from './postos/postosListHandler.js'
 
 export function createApp() {
   const app = express()
@@ -21,6 +22,10 @@ export function createApp() {
       status: 'ok',
       message: 'Backend funcionando com TypeScript',
     })
+  })
+
+  app.get('/postos', (req: any, res: any) => {
+    return handleListPostos(req, res)
   })
 
   app.post('/importacoes/postos/preview', upload.single('file'), (req: any, res: any) => {

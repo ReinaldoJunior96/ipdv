@@ -134,6 +134,8 @@ body {
   margin-top: 18px;
   display: flex;
   justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .table-card {
@@ -145,6 +147,20 @@ body {
 
 .table-header {
   margin-bottom: 16px;
+}
+
+.persisted-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.persisted-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .filters-bar {
@@ -272,6 +288,10 @@ body {
   }
 
   .hero-header {
+    flex-direction: column;
+  }
+
+  .persisted-header {
     flex-direction: column;
   }
 
