@@ -4,6 +4,7 @@ export async function handleListPostos(_req: any, res: any) {
   try {
     const postos = await listPostos()
 
+    /* Normatizar a saida com um DTO tambem seria uma opção alem de ser normatizado pela query */
     return res.status(200).json({
       message: 'Postos carregados com sucesso.',
       total: postos.length,
