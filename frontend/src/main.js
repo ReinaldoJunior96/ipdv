@@ -6,7 +6,8 @@ import 'vuetify/styles'
 import '@mdi/font/css/materialdesignicons.css'
 import './style.css'
 import App from './App.vue'
-import { createHttpClient, HTTP_CLIENT_KEY } from './lib/http'
+import { createHttpClient } from './lib/http'
+import { POSTOS_API_KEY, createPostosApi } from './lib/postosApi'
 
 const vuetify = createVuetify({
   components,
@@ -28,5 +29,5 @@ const vuetify = createVuetify({
 
 const app = createApp(App)
 app.use(vuetify)
-app.provide(HTTP_CLIENT_KEY, createHttpClient())
+app.provide(POSTOS_API_KEY, createPostosApi(createHttpClient()))
 app.mount('#app')

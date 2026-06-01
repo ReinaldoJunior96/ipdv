@@ -3,9 +3,9 @@ import { inject, computed, ref } from 'vue'
 import PostosImportCard from './components/PostosImportCard.vue'
 import PostosPersistedTable from './components/PostosPersistedTable.vue'
 import PostosPreviewTable from './components/PostosPreviewTable.vue'
-import { HTTP_CLIENT_KEY, resolveApiBaseUrl } from './lib/http'
+import { POSTOS_API_KEY } from './lib/postosApi'
 
-const http = inject(HTTP_CLIENT_KEY)
+const postosApi = inject(POSTOS_API_KEY)
 const fileInput = ref(null)
 const isDragging = ref(false)
 const isParsing = ref(false)
@@ -352,7 +352,7 @@ function mapImportRows(rows) {
 }
 
 async function submitToBackend() {
-  if (!selectedFile.value || !http) {
+  if (!selectedFile.value || !postosApi) {
     return
   }
 
@@ -364,11 +364,7 @@ async function submitToBackend() {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
 
-    const { data } = await http.post('/importacoes/postos', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
+    const { data } = await postosApi.importCsv(formData)
 
     importResponse.value = data
     importedRows.value = mapImportRows(data.rows)
@@ -400,7 +396,7 @@ function mapPersistedRow(row) {
 }
 
 async function fetchPersistedPostos() {
-  if (!http) {
+  if (!postosApi) {
     return
   }
 
@@ -408,7 +404,7 @@ async function fetchPersistedPostos() {
   persistedError.value = ''
 
   try {
-    const { data } = await http.get('/postos')
+    const { data } = await postosApi.list()
     persistedRows.value = data.rows.map(mapPersistedRow)
   } catch (error) {
     persistedError.value =
@@ -421,7 +417,7 @@ async function fetchPersistedPostos() {
 }
 
 async function clearPersistedPostos() {
-  if (!http) {
+  if (!postosApi) {
     return
   }
 
@@ -437,7 +433,7 @@ async function clearPersistedPostos() {
   persistedError.value = ''
 
   try {
-    const { data } = await http.delete('/postos')
+    const { data } = await postosApi.clear()
     persistedRows.value = []
     importResponse.value = null
     selectedFile.value = null
@@ -458,7 +454,7 @@ async function clearPersistedPostos() {
 function exportPostos() {
   persistedError.value = ''
   const link = document.createElement('a')
-  link.href = `${resolveApiBaseUrl()}/postos/exportar`
+  link.href = postosApi?.exportUrl() || '#'
   link.target = '_blank'
   link.rel = 'noopener'
   link.click()
