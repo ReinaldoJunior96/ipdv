@@ -4,6 +4,9 @@ import PostosImportCard from './components/PostosImportCard.vue'
 import PostosPersistedTable from './components/PostosPersistedTable.vue'
 import PostosPreviewTable from './components/PostosPreviewTable.vue'
 import { POSTOS_API_KEY } from './lib/postosApi'
+import { isCsvFile, parseCsv } from './utils/postosCsvParser'
+import { normalizeRow, validateRow } from './utils/postosCsvValidation'
+import { mapImportRows, mapPersistedRow } from './utils/postosRowMappers'
 
 const postosApi = inject(POSTOS_API_KEY)
 const fileInput = ref(null)
@@ -45,8 +48,6 @@ const columns = [
 ]
 
 const expectedHeaders = columns.map((column) => column.key)
-const requiredRowFields = ['cnpj', 'nome_posto', 'municipio', 'uf', 'status']
-const basicEmailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const selectedFileLabel = computed(() => {
   if (!selectedFile.value) {
@@ -73,214 +74,6 @@ const persistedSummary = computed(() => {
   const total = persistedRows.value.length
   return `${total} posto${total !== 1 ? 's' : ''} cadastrado${total !== 1 ? 's' : ''}`
 })
-
-function isCsvFile(file) {
-  if (!file) {
-    return false
-  }
-
-  const lowerName = file.name.toLowerCase()
-  return lowerName.endsWith('.csv') || file.type === 'text/csv'
-}
-
-function normalizeHeader(value) {
-  return String(value || '').trim().toLowerCase()
-}
-
-function normalizeText(value) {
-  return String(value || '').replace(/\s+/g, ' ').trim()
-}
-
-function normalizeDigits(value) {
-  return String(value || '').replace(/\D/g, '')
-}
-
-function expandScientificNotation(value) {
-  const normalizedValue = normalizeText(value)
-  const scientificMatch = normalizedValue.match(/^(\d+)(?:[.,](\d+))?[eE]\+?(\d+)$/)
-
-  if (!scientificMatch) {
-    return null
-  }
-
-  const integerPart = scientificMatch[1]
-  const fractionalPart = scientificMatch[2] || ''
-  const exponent = Number(scientificMatch[3])
-  const significantDigits = `${integerPart}${fractionalPart}`
-  const zeroCount = exponent - fractionalPart.length
-
-  if (Number.isNaN(exponent) || zeroCount < 0) {
-    return null
-  }
-
-  return `${significantDigits}${'0'.repeat(zeroCount)}`
-}
-
-function normalizeDocumentField(value, label) {
-  const normalizedValue = normalizeText(value)
-  const scientificValue = expandScientificNotation(normalizedValue)
-
-  if (scientificValue) {
-    return {
-      value: scientificValue,
-      warning: `${label} veio em notacao cientifica e foi normalizado para visualizacao.`,
-    }
-  }
-
-  return {
-    value: normalizeDigits(normalizedValue),
-    warning: '',
-  }
-}
-
-function normalizeOptionalEmail(value) {
-  return normalizeText(value).toLowerCase()
-}
-
-function normalizeDate(value) {
-  return normalizeText(value).replace(/\s/g, '')
-}
-
-function detectDelimiter(headerLine) {
-  const candidates = [',', ';', '\t']
-  const counts = candidates.map((delimiter) => ({
-    delimiter,
-    count: headerLine.split(delimiter).length,
-  }))
-
-  return counts.sort((left, right) => right.count - left.count)[0].delimiter
-}
-
-function splitCsvLine(line, delimiter) {
-  const values = []
-  let currentValue = ''
-  let insideQuotes = false
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index]
-    const nextChar = line[index + 1]
-
-    if (char === '"') {
-      if (insideQuotes && nextChar === '"') {
-        currentValue += '"'
-        index += 1
-      } else {
-        insideQuotes = !insideQuotes
-      }
-      continue
-    }
-
-    if (char === delimiter && !insideQuotes) {
-      values.push(currentValue.trim())
-      currentValue = ''
-      continue
-    }
-
-    currentValue += char
-  }
-
-  values.push(currentValue.trim())
-  return values
-}
-
-function parseCsv(text) {
-  const normalizedText = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
-
-  if (!normalizedText) {
-    return { headers: [], rows: [] }
-  }
-
-  const lines = normalizedText
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-
-  if (lines.length < 2) {
-    return { headers: [], rows: [] }
-  }
-
-  const delimiter = detectDelimiter(lines[0])
-  const headers = splitCsvLine(lines[0], delimiter).map(normalizeHeader)
-  const rows = lines.slice(1).map((line, index) => {
-    const values = splitCsvLine(line, delimiter)
-
-    const rawRow = headers.reduce((row, header, valueIndex) => {
-      row[header] = values[valueIndex] || ''
-      return row
-    }, {})
-
-    return { lineNumber: index + 2, rawRow }
-  })
-
-  return { headers, rows }
-}
-
-function normalizeRow(rawRow) {
-  const cnpjField = normalizeDocumentField(rawRow.cnpj, 'CNPJ')
-  const cepField = normalizeDocumentField(rawRow.cep, 'CEP')
-  const cpfField = normalizeDocumentField(rawRow.cpf_responsavel, 'CPF do responsavel')
-
-  return {
-    cnpj: cnpjField.value,
-    nome_posto: normalizeText(rawRow.nome_posto),
-    nome_fantasia: normalizeText(rawRow.nome_fantasia),
-    bandeira: normalizeText(rawRow.bandeira),
-    logradouro: normalizeText(rawRow.logradouro),
-    numero: normalizeText(rawRow.numero),
-    complemento: normalizeText(rawRow.complemento),
-    bairro: normalizeText(rawRow.bairro),
-    municipio: normalizeText(rawRow.municipio),
-    uf: normalizeText(rawRow.uf).toUpperCase(),
-    cep: cepField.value,
-    cpf_responsavel: cpfField.value,
-    nome_responsavel: normalizeText(rawRow.nome_responsavel),
-    email_responsavel: normalizeOptionalEmail(rawRow.email_responsavel),
-    cargo_responsavel: normalizeText(rawRow.cargo_responsavel),
-    combustiveis: normalizeText(rawRow.combustiveis),
-    status: normalizeText(rawRow.status).toUpperCase(),
-    data_inauguracao: normalizeDate(rawRow.data_inauguracao),
-    numero_bicos: normalizeText(rawRow.numero_bicos),
-    numero_pistas: normalizeText(rawRow.numero_pistas),
-    observacoes: normalizeText(rawRow.observacoes),
-    __warnings: [cnpjField.warning, cepField.warning, cpfField.warning].filter(Boolean),
-  }
-}
-
-function validateRow(row) {
-  const errors = []
-
-  for (const field of requiredRowFields) {
-    if (!row[field]) {
-      errors.push(`Campo obrigatorio ausente: ${field}.`)
-    }
-  }
-
-  if (row.cnpj && row.cnpj.length !== 14) {
-    errors.push('CNPJ deve conter 14 digitos.')
-  }
-
-  if (row.cpf_responsavel && row.cpf_responsavel.length !== 11) {
-    errors.push('CPF do responsavel deve conter 11 digitos.')
-  }
-
-  if (row.uf && row.uf.length !== 2) {
-    errors.push('UF deve conter 2 letras.')
-  }
-
-  if (row.email_responsavel && !basicEmailPattern.test(row.email_responsavel)) {
-    errors.push('Email do responsavel esta em formato invalido.')
-  }
-
-  if (row.numero_bicos && Number.isNaN(Number(row.numero_bicos))) {
-    errors.push('Numero de bicos deve ser numerico.')
-  }
-
-  if (row.numero_pistas && Number.isNaN(Number(row.numero_pistas))) {
-    errors.push('Numero de pistas deve ser numerico.')
-  }
-
-  return errors
-}
 
 async function parseAndStoreFile(file) {
   const text = await file.text()
@@ -341,16 +134,6 @@ async function setFile(file) {
   }
 }
 
-function mapImportRows(rows) {
-  return rows.map((row) => ({
-    ...row,
-    __lineNumber: row.lineNumber,
-    __errors: row.errors,
-    __warnings: row.warnings,
-    __isValid: row.isValid,
-  }))
-}
-
 async function submitToBackend() {
   if (!selectedFile.value || !postosApi) {
     return
@@ -376,22 +159,6 @@ async function submitToBackend() {
       'Falha ao enviar o arquivo para o backend.'
   } finally {
     isSubmitting.value = false
-  }
-}
-
-function mapPersistedRow(row) {
-  return {
-    ...row,
-    combustiveis: Array.isArray(row.combustiveis) ? row.combustiveis.join(', ') : row.combustiveis || '-',
-    data_inauguracao: row.data_inauguracao || '-',
-    numero_bicos: row.numero_bicos ?? '-',
-    numero_pistas: row.numero_pistas ?? '-',
-    nome_fantasia: row.nome_fantasia || '-',
-    numero: row.numero || '-',
-    complemento: row.complemento || '-',
-    email_responsavel: row.email_responsavel || '-',
-    cargo_responsavel: row.cargo_responsavel || '-',
-    observacoes: row.observacoes || '-',
   }
 }
 
