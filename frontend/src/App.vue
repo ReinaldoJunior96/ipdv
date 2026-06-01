@@ -1,7 +1,11 @@
 <script setup>
-import axios from 'axios'
-import { computed, onMounted, ref } from 'vue'
+import { inject, computed, ref } from 'vue'
+import PostosImportCard from './components/PostosImportCard.vue'
+import PostosPersistedTable from './components/PostosPersistedTable.vue'
+import PostosPreviewTable from './components/PostosPreviewTable.vue'
+import { HTTP_CLIENT_KEY, resolveApiBaseUrl } from './lib/http'
 
+const http = inject(HTTP_CLIENT_KEY)
 const fileInput = ref(null)
 const isDragging = ref(false)
 const isParsing = ref(false)
@@ -15,10 +19,6 @@ const persistedRows = ref([])
 const importResponse = ref(null)
 const submitError = ref('')
 const persistedError = ref('')
-const searchTerm = ref('')
-const selectedUf = ref(null)
-const selectedStatus = ref(null)
-const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
 
 const columns = [
   { key: 'cnpj', label: 'CNPJ' },
@@ -57,57 +57,12 @@ const selectedFileLabel = computed(() => {
   return `${selectedFile.value.name} • ${sizeInKb} KB`
 })
 
-const importedSummary = computed(() => {
-  const total = importedRows.value.length
-  if (!total) {
-    return 'Nenhum posto importado ainda'
-  }
-
-  return `${total} posto${total > 1 ? 's' : ''} carregado${total > 1 ? 's' : ''}`
-})
-
 const validRowsCount = computed(() => {
   return importedRows.value.filter((row) => row.__isValid).length
 })
 
 const invalidRowsCount = computed(() => {
   return importedRows.value.length - validRowsCount.value
-})
-
-const ufOptions = computed(() => {
-  return [...new Set(importedRows.value.map((row) => row.uf).filter(Boolean))].sort()
-})
-
-const statusOptions = computed(() => {
-  return [...new Set(importedRows.value.map((row) => row.status).filter(Boolean))].sort()
-})
-
-const filteredRows = computed(() => {
-  const normalizedSearch = searchTerm.value.trim().toLowerCase()
-
-  return importedRows.value.filter((row) => {
-    const matchesUf = !selectedUf.value || row.uf === selectedUf.value
-    const matchesStatus = !selectedStatus.value || row.status === selectedStatus.value
-    const matchesSearch =
-      !normalizedSearch ||
-      columns.some((column) =>
-        String(row[column.key] || '')
-          .toLowerCase()
-          .includes(normalizedSearch),
-      ) ||
-      row.__errors.some((error) => error.toLowerCase().includes(normalizedSearch)) ||
-      row.__warnings.some((warning) => warning.toLowerCase().includes(normalizedSearch))
-
-    return matchesUf && matchesStatus && matchesSearch
-  })
-})
-
-const filteredSummary = computed(() => {
-  if (!importedRows.value.length) {
-    return ''
-  }
-
-  return `${filteredRows.value.length} de ${importedRows.value.length} registro${importedRows.value.length > 1 ? 's' : ''}`
 })
 
 const canSubmit = computed(() => {
@@ -129,15 +84,11 @@ function isCsvFile(file) {
 }
 
 function normalizeHeader(value) {
-  return String(value || '')
-    .trim()
-    .toLowerCase()
+  return String(value || '').trim().toLowerCase()
 }
 
 function normalizeText(value) {
-  return String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim()
+  return String(value || '').replace(/\s+/g, ' ').trim()
 }
 
 function normalizeDigits(value) {
@@ -258,10 +209,7 @@ function parseCsv(text) {
       return row
     }, {})
 
-    return {
-      lineNumber: index + 2,
-      rawRow,
-    }
+    return { lineNumber: index + 2, rawRow }
   })
 
   return { headers, rows }
@@ -384,9 +332,6 @@ async function setFile(file) {
   try {
     await parseAndStoreFile(file)
     selectedFile.value = file
-    searchTerm.value = ''
-    selectedUf.value = null
-    selectedStatus.value = null
   } catch (error) {
     selectedFile.value = null
     importedRows.value = []
@@ -396,8 +341,18 @@ async function setFile(file) {
   }
 }
 
+function mapImportRows(rows) {
+  return rows.map((row) => ({
+    ...row,
+    __lineNumber: row.lineNumber,
+    __errors: row.errors,
+    __warnings: row.warnings,
+    __isValid: row.isValid,
+  }))
+}
+
 async function submitToBackend() {
-  if (!selectedFile.value) {
+  if (!selectedFile.value || !http) {
     return
   }
 
@@ -409,20 +364,14 @@ async function submitToBackend() {
     const formData = new FormData()
     formData.append('file', selectedFile.value)
 
-    const { data } = await axios.post(`${apiBaseUrl}/importacoes/postos`, formData, {
+    const { data } = await http.post('/importacoes/postos', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     })
 
     importResponse.value = data
-    importedRows.value = data.rows.map((row) => ({
-      ...row,
-      __lineNumber: row.lineNumber,
-      __errors: row.errors,
-      __warnings: row.warnings,
-      __isValid: row.isValid,
-    }))
+    importedRows.value = mapImportRows(data.rows)
     await fetchPersistedPostos()
   } catch (error) {
     submitError.value =
@@ -451,11 +400,15 @@ function mapPersistedRow(row) {
 }
 
 async function fetchPersistedPostos() {
+  if (!http) {
+    return
+  }
+
   isLoadingPersisted.value = true
   persistedError.value = ''
 
   try {
-    const { data } = await axios.get(`${apiBaseUrl}/postos`)
+    const { data } = await http.get('/postos')
     persistedRows.value = data.rows.map(mapPersistedRow)
   } catch (error) {
     persistedError.value =
@@ -468,6 +421,10 @@ async function fetchPersistedPostos() {
 }
 
 async function clearPersistedPostos() {
+  if (!http) {
+    return
+  }
+
   const confirmed = window.confirm(
     'Isso vai apagar todos os postos cadastrados e o historico de importacoes. Deseja continuar?',
   )
@@ -480,16 +437,13 @@ async function clearPersistedPostos() {
   persistedError.value = ''
 
   try {
-    const { data } = await axios.delete(`${apiBaseUrl}/postos`)
+    const { data } = await http.delete('/postos')
     persistedRows.value = []
     importResponse.value = null
     selectedFile.value = null
     importedRows.value = []
     validationError.value = ''
     submitError.value = ''
-    searchTerm.value = ''
-    selectedUf.value = null
-    selectedStatus.value = null
     persistedError.value = data.message || 'Dados cadastrados limpos com sucesso.'
   } catch (error) {
     persistedError.value =
@@ -503,9 +457,8 @@ async function clearPersistedPostos() {
 
 function exportPostos() {
   persistedError.value = ''
-
   const link = document.createElement('a')
-  link.href = `${apiBaseUrl}/postos/exportar`
+  link.href = `${resolveApiBaseUrl()}/postos/exportar`
   link.target = '_blank'
   link.rel = 'noopener'
   link.click()
@@ -526,9 +479,7 @@ function handleDrop(event) {
   void setFile(file)
 }
 
-onMounted(() => {
-  void fetchPersistedPostos()
-})
+void fetchPersistedPostos()
 </script>
 
 <template>
@@ -538,376 +489,49 @@ onMounted(() => {
         <v-container class="page-container py-8">
           <v-row justify="center">
             <v-col cols="12" lg="10" xl="9">
-              <v-card class="home-card" rounded="xl" elevation="0">
-                <div class="eyebrow">Importacao CSV</div>
-                <div class="hero-header">
-                  <div>
-                    <h1 class="home-title">Importar e visualizar postos</h1>
-                    <p class="home-subtitle">
-                      Envie um arquivo <strong>.csv</strong>, valide os dados na interface e
-                      confira os registros antes do envio real ao backend.
-                    </p>
-                  </div>
+              <PostosImportCard
+                :file-label="selectedFileLabel"
+                :is-parsing="isParsing"
+                :is-submitting="isSubmitting"
+                :validation-error="validationError"
+                :submit-error="submitError"
+                :import-response="importResponse"
+                :selected-file="selectedFile"
+                :invalid-rows-count="invalidRowsCount"
+                :valid-rows-count="validRowsCount"
+                :imported-rows-count="importedRows.length"
+                :can-submit="canSubmit"
+                :is-dragging="isDragging"
+                @open-file-picker="openFilePicker"
+                @submit="submitToBackend"
+                @drag-state="isDragging = $event"
+                @drop-file="handleDrop"
+              />
 
-                  <v-chip color="secondary" text-color="primary" variant="flat">
-                    {{ importedSummary }}
-                  </v-chip>
-                </div>
+              <input
+                ref="fileInput"
+                class="sr-only"
+                type="file"
+                accept=".csv,text/csv"
+                @change="handleFileSelection"
+              />
 
-                <div
-                  class="dropzone"
-                  :class="{ 'dropzone-active': isDragging }"
-                  @click="openFilePicker"
-                  @dragenter.prevent="isDragging = true"
-                  @dragover.prevent="isDragging = true"
-                  @dragleave.prevent="isDragging = false"
-                  @drop.prevent="handleDrop"
-                >
-                  <v-icon icon="mdi-file-delimited-outline" size="40" color="primary" />
-                  <div class="dropzone-title">Arraste o arquivo CSV aqui</div>
-                  <div class="dropzone-text">ou clique para selecionar um arquivo</div>
+              <PostosPreviewTable
+                :columns="columns"
+                :rows="importedRows"
+              />
 
-                  <v-chip class="mt-3" color="secondary" text-color="primary" variant="flat">
-                    Aceita apenas .csv
-                  </v-chip>
-                </div>
-
-                <input
-                  ref="fileInput"
-                  class="sr-only"
-                  type="file"
-                  accept=".csv,text/csv"
-                  @change="handleFileSelection"
-                />
-
-                <div class="feedback-block">
-                  <v-progress-linear
-                    v-if="isParsing"
-                    color="primary"
-                    indeterminate
-                    rounded
-                  />
-
-                  <v-progress-linear
-                    v-else-if="isSubmitting"
-                    color="primary"
-                    indeterminate
-                    rounded
-                  />
-
-                  <v-alert
-                    v-else-if="validationError"
-                    type="error"
-                    variant="tonal"
-                    density="comfortable"
-                    rounded="lg"
-                  >
-                    {{ validationError }}
-                  </v-alert>
-
-                  <v-alert
-                    v-else-if="submitError"
-                    type="error"
-                    variant="tonal"
-                    density="comfortable"
-                    rounded="lg"
-                  >
-                    {{ submitError }}
-                  </v-alert>
-
-                  <v-alert
-                    v-else-if="importResponse"
-                    :type="importResponse.invalidRows > 0 ? 'warning' : 'success'"
-                    variant="tonal"
-                    density="comfortable"
-                    rounded="lg"
-                  >
-                    {{ importResponse.message }}
-                    <template v-if="typeof importResponse.importedPostos === 'number'">
-                      {{ ' ' }}{{ importResponse.importedPostos }} posto(s) cadastrado(s) no banco.
-                    </template>
-                  </v-alert>
-
-                  <v-alert
-                    v-else-if="selectedFile && invalidRowsCount"
-                    type="warning"
-                    variant="tonal"
-                    density="comfortable"
-                    rounded="lg"
-                  >
-                    Arquivo carregado com pendencias: {{ invalidRowsCount }} linha(s) com erro e
-                    {{ validRowsCount }} valida(s).
-                  </v-alert>
-
-                  <v-alert
-                    v-else-if="selectedFile"
-                    type="success"
-                    variant="tonal"
-                    density="comfortable"
-                    rounded="lg"
-                  >
-                    Arquivo carregado: {{ selectedFileLabel }}
-                  </v-alert>
-
-                  <v-sheet
-                    v-else
-                    class="file-placeholder"
-                    color="transparent"
-                    rounded="lg"
-                  >
-                    {{ selectedFileLabel }}
-                  </v-sheet>
-                </div>
-
-                <div v-if="importedRows.length" class="validation-summary">
-                  <v-chip color="success" variant="tonal">
-                    {{ validRowsCount }} linha(s) validas
-                  </v-chip>
-                  <v-chip color="warning" variant="tonal">
-                    {{ invalidRowsCount }} linha(s) com erro
-                  </v-chip>
-                </div>
-
-                <div class="actions">
-                  <v-btn color="primary" size="large" rounded="pill" @click="openFilePicker">
-                    Selecionar arquivo
-                  </v-btn>
-                  <v-btn
-                    color="primary"
-                    variant="flat"
-                    size="large"
-                    rounded="pill"
-                    :loading="isSubmitting"
-                    :disabled="!canSubmit"
-                    @click="submitToBackend"
-                  >
-                    Cadastrar no banco
-                  </v-btn>
-                </div>
-              </v-card>
-
-              <v-card class="table-card mt-5" rounded="xl" elevation="0">
-                <div class="table-header">
-                  <div>
-                    <h2 class="section-title">Postos importados</h2>
-                    <p class="section-subtitle">
-                      Pre-visualizacao com normalizacao leve e erros simples por linha.
-                    </p>
-                  </div>
-                </div>
-
-                <div v-if="importedRows.length" class="filters-bar">
-                  <v-text-field
-                    v-model="searchTerm"
-                    label="Buscar na tabela"
-                    placeholder="CNPJ, nome, municipio, responsavel ou erro..."
-                    density="comfortable"
-                    variant="outlined"
-                    hide-details
-                    prepend-inner-icon="mdi-magnify"
-                    clearable
-                  />
-
-                  <v-select
-                    v-model="selectedUf"
-                    :items="ufOptions"
-                    label="UF"
-                    density="comfortable"
-                    variant="outlined"
-                    hide-details
-                    clearable
-                  />
-
-                  <v-select
-                    v-model="selectedStatus"
-                    :items="statusOptions"
-                    label="Status"
-                    density="comfortable"
-                    variant="outlined"
-                    hide-details
-                    clearable
-                  />
-                </div>
-
-                <div v-if="importedRows.length" class="filters-summary">
-                  {{ filteredSummary }}
-                </div>
-
-                <v-sheet
-                  v-if="filteredRows.length"
-                  class="table-wrapper"
-                  rounded="lg"
-                  border
-                >
-                  <v-table density="comfortable" fixed-header height="460">
-                    <thead>
-                      <tr>
-                        <th>Validacao</th>
-                        <th>Linha</th>
-                        <th v-for="column in columns" :key="column.key">
-                          {{ column.label }}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr
-                        v-for="(row, index) in filteredRows"
-                        :key="`${row.cnpj}-${index}-${row.__lineNumber}`"
-                        :class="{ 'row-invalid': !row.__isValid }"
-                      >
-                        <td class="validation-cell">
-                          <v-chip
-                            :color="row.__isValid ? 'success' : 'warning'"
-                            size="small"
-                            variant="tonal"
-                          >
-                            {{ row.__isValid ? 'Valido' : 'Com erro' }}
-                          </v-chip>
-                          <div v-if="row.__errors.length" class="row-errors">
-                            <div v-for="error in row.__errors" :key="error">
-                              {{ error }}
-                            </div>
-                          </div>
-                          <div v-if="row.__warnings.length" class="row-warnings">
-                            <div v-for="warning in row.__warnings" :key="warning">
-                              {{ warning }}
-                            </div>
-                          </div>
-                        </td>
-                        <td>{{ row.__lineNumber }}</td>
-                        <td v-for="column in columns" :key="column.key">
-                          {{ row[column.key] || '-' }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </v-sheet>
-
-                <v-sheet
-                  v-else-if="importedRows.length"
-                  class="empty-state"
-                  color="transparent"
-                  rounded="lg"
-                >
-                  <v-icon icon="mdi-filter-off-outline" size="34" color="primary" />
-                  <div class="empty-title">Nenhum resultado para os filtros atuais</div>
-                  <div class="empty-text">
-                    Ajuste a busca, a UF ou o status para localizar os registros desejados.
-                  </div>
-                </v-sheet>
-
-                <v-sheet
-                  v-else
-                  class="empty-state"
-                  color="transparent"
-                  rounded="lg"
-                >
-                  <v-icon icon="mdi-database-eye-outline" size="34" color="primary" />
-                  <div class="empty-title">Nenhum dado para mostrar</div>
-                  <div class="empty-text">
-                    Envie um CSV valido para visualizar os postos importados nesta tela.
-                  </div>
-                </v-sheet>
-              </v-card>
-
-              <v-card class="table-card mt-5" rounded="xl" elevation="0">
-                <div class="table-header persisted-header">
-                  <div>
-                    <h2 class="section-title">Postos cadastrados no banco</h2>
-                    <p class="section-subtitle">
-                      Lista simples dos registros persistidos no PostgreSQL.
-                    </p>
-                  </div>
-
-                  <div class="persisted-actions">
-                    <v-chip color="secondary" text-color="primary" variant="flat">
-                      {{ persistedSummary }}
-                    </v-chip>
-                    <v-btn
-                      color="error"
-                      variant="tonal"
-                      rounded="pill"
-                      :loading="isClearingPersisted"
-                      @click="clearPersistedPostos"
-                    >
-                      Limpar banco
-                    </v-btn>
-                    <v-btn
-                      color="primary"
-                      variant="flat"
-                      rounded="pill"
-                      @click="exportPostos"
-                    >
-                      Exportar dados
-                    </v-btn>
-                    <v-btn
-                      color="primary"
-                      variant="outlined"
-                      rounded="pill"
-                      :loading="isLoadingPersisted"
-                      @click="fetchPersistedPostos"
-                    >
-                      Atualizar lista
-                    </v-btn>
-                  </div>
-                </div>
-
-                <v-alert
-                  v-if="persistedError"
-                  class="mb-4"
-                  :type="persistedRows.length ? 'error' : 'success'"
-                  variant="tonal"
-                  density="comfortable"
-                  rounded="lg"
-                >
-                  {{ persistedError }}
-                </v-alert>
-
-                <v-progress-linear
-                  v-else-if="isLoadingPersisted"
-                  color="primary"
-                  indeterminate
-                  rounded
-                  class="mb-4"
-                />
-
-                <v-sheet
-                  v-if="persistedRows.length"
-                  class="table-wrapper"
-                  rounded="lg"
-                  border
-                >
-                  <v-table density="comfortable" fixed-header height="420">
-                    <thead>
-                      <tr>
-                        <th v-for="column in columns" :key="`persisted-${column.key}`">
-                          {{ column.label }}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr v-for="row in persistedRows" :key="`persisted-${row.id}`">
-                        <td v-for="column in columns" :key="`persisted-${row.id}-${column.key}`">
-                          {{ row[column.key] || '-' }}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </v-table>
-                </v-sheet>
-
-                <v-sheet
-                  v-else-if="!isLoadingPersisted"
-                  class="empty-state"
-                  color="transparent"
-                  rounded="lg"
-                >
-                  <v-icon icon="mdi-database-outline" size="34" color="primary" />
-                  <div class="empty-title">Nenhum posto cadastrado ainda</div>
-                  <div class="empty-text">
-                    Importe um CSV para persistir os dados e visualizar os postos nesta lista.
-                  </div>
-                </v-sheet>
-              </v-card>
+              <PostosPersistedTable
+                :columns="columns"
+                :rows="persistedRows"
+                :is-loading="isLoadingPersisted"
+                :is-clearing="isClearingPersisted"
+                :error-message="persistedError"
+                :summary="persistedSummary"
+                @refresh="fetchPersistedPostos"
+                @export="exportPostos"
+                @clear="clearPersistedPostos"
+              />
             </v-col>
           </v-row>
         </v-container>
