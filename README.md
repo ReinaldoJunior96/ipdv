@@ -1,25 +1,3 @@
-# IPDV Web
-
-Aplicação fullstack para importar postos de combustível via CSV, validar os dados, persistir no PostgreSQL, visualizar os registros cadastrados e exportar novamente em CSV compatível com nova importação.
-
-## Stack
-
-- Node.js 22+
-- Backend: Express + `pg`
-- Frontend: Vue 3 + Vuetify
-- Banco: PostgreSQL
-- Infra local: Docker Compose
-
-## Funcionalidades atuais
-
-- Upload de CSV com preview e validação no frontend
-- Preview e validação autoritativa no backend
-- Importação para o PostgreSQL
-- Persistência em tabelas normalizadas
-- Listagem dos postos cadastrados
-- Exportação dos postos em CSV
-- Limpeza dos dados cadastrados
-
 ## Requisitos
 
 - Docker e Docker Compose
